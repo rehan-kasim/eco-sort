@@ -1,0 +1,57 @@
+{
+  "rules": {
+    "ecosort": {
+      "v1": {
+        // ------------------------------------------------------------------
+        // Pilot rules for EcoSort AI (Realtime Database, NO AUTHENTICATION).
+        //
+        // Threat model accepted for classroom pilots:
+        // - Reads are PUBLIC (leaderboards need them; student names are
+        //   pseudonymized at write time, so nothing sensitive is readable).
+        // - Writes are PUBLIC but structurally validated below; all scoring
+        //   math is recomputed from shared tables, and abuse is bounded by
+        //   daily caps + rate expectations, exactly like the /api backend.
+        // - QR codes, scan records and profile IDs are unguessable enough
+        //   that casual tampering is pointless; targeted abuse is visible
+        //   in per-school aggregates.
+        //
+        // BEFORE PRODUCTION: enable Anonymous Auth and scope every write to
+        //   `auth.uid === $pid`, and add App Check. Then tighten these rules.
+        // Install: Firebase console → Realtime Database → Rules → paste →
+        // Publish.
+        // ------------------------------------------------------------------
+        "profiles": {
+          "$pid": {
+            ".read": true,
+            ".write": true,
+            ".validate": "newData.hasChildren(['id', 'name', 'school'])"
+          }
+        },
+        "scans": {
+          "$pid": {
+            ".read": true,
+            ".write": true
+          }
+        },
+        "challenges": {
+          "$pid": {
+            ".read": true,
+            ".write": true
+          }
+        },
+        "challengesIndex": {
+          ".read": true,
+          ".write": true
+        },
+        "schools": {
+          ".read": true,
+          ".write": true
+        },
+        "counters": {
+          ".read": true,
+          ".write": true
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Offline · EcoSort AI</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #F8FAFC; color: #0F172A; display: grid; place-items: center; min-height: 100vh; padding: 24px; box-sizing: border-box; }
+    .card { background: #fff; border: 1px solid #E4E7EB; border-radius: 20px; padding: 32px; max-width: 380px; text-align: center; box-shadow: 0 10px 30px -18px rgb(30 58 95 / .4); }
+    .leaf { width: 52px; height: 52px; border-radius: 14px; background: #1E3A5F; color: #fff; display: grid; place-items: center; font-size: 26px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 16px 0 8px; }
+    p { font-size: 14px; color: #475569; line-height: 1.55; }
+    button { margin-top: 16px; background: #059669; color: #fff; border: 0; border-radius: 12px; padding: 12px 24px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="leaf">♻</div>
+    <h1>You're offline</h1>
+    <p>EcoSort AI needs internet for AI scans and syncing points. Anything you queued on this device is safe and will sync when you're back.</p>
+    <button onclick="location.reload()">Try again</button>
+  </div>
+</body>
+</html>

@@ -1,0 +1,1 @@
+import{W as f}from"./index-CXsSEDaA.js";const i=e=>e.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");function m(e){const o=(e||"").toLowerCase();if(!o.trim())return null;let n=null,r=0;for(const s of f)for(const c of s.keywords){const t=c.trim().toLowerCase();t&&new RegExp(`\\b${i(t)}\\b`).test(o)&&t.length>r&&(n=s,r=t.length)}return n}export{m};
