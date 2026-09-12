@@ -2,9 +2,8 @@
 //   STATE (profiles, disposals, challenges, ranks): exactly ONE cloud tier is
 //   ever active — Firebase when configured, else /api. Never cascades (that
 //   would split-brain stores). Unreachable → {offline:true} → on-device paths.
-//   AI (classify): /api first (server keys: Groq, then Gemini), then Firebase
-//   AI Logic, then the caller falls back to the on-device model. AI calls are
-//   stateless, so ordering here cannot split-brain anything.
+//   AI (classify): Groq via /api ONLY — a single detector, retried by the
+//   caller until it answers. There is no local fallback model.
 // Signatures match backend.js exactly.
 import {
   challengeAction as httpChallengeAction,
@@ -28,39 +27,24 @@ async function fb() {
 }
 
 export async function classifyRemote(payload) {
-  // /api first (Groq/Gemini server keys), Firebase AI second, on-device last
-  // (the caller falls back when this resolves !ok). Each step fails fast when
-  // its backend is absent, so plain `vite dev` stays snappy.
-  let httpErr = null
+  // Groq via /api is the one and only detector. A single attempt per call —
+  // the Scanner loops with backoff until it succeeds. On success, record the
+  // Firebase scan entry too (when that tier is configured) so the +10 bonus
+  // path keeps working there.
+  const http = await httpClassify(payload).catch(() => null)
+  if (!http) return OFFLINE()
+  if (!http.ok) return http
   try {
-    const http = await httpClassify(payload)
-    if (http.ok) return http
-    httpErr = http
-  } catch {
-    httpErr = null
-  }
-  const f = await fb().catch(() => null)
-  if (f) {
-    try {
-      const r = await timeout(f.fbClassify(payload.image, { hint: payload.hint, fileName: payload.fileName, mimeType: payload.mimeType }), 60000)
-      if (r.ok) {
-        // Single-use scan record: the Firebase equivalent of HMAC scan tokens.
-        // The dispose call consumes it transactionally for the +10 bonus.
-        let scan = null
-        try {
-          const { profileId } = loadState()
-          if (profileId && !String(profileId).startsWith('local_')) {
-            const s = await timeout(f.fbRecordScan({ profileId, item: r.item.name, bin: r.item.bin }), 10000)
-            if (s.ok) scan = { ...s.scan, at: Date.now() }
-          }
-        } catch { /* bonus unavailable — the result itself is still valid */ }
-        return { ...r, scan }
+    const f = await fb().catch(() => null)
+    if (f) {
+      const { profileId } = loadState()
+      if (profileId && !String(profileId).startsWith('local_')) {
+        const s = await timeout(f.fbRecordScan({ profileId, item: http.item.name, bin: http.item.bin }), 10000)
+        if (s.ok) return { ...http, scan: { ...s.scan, at: Date.now() } }
       }
-      // A real Firebase error (quota, model) beats a stale http error.
-      return r.offline && httpErr ? httpErr : r
-    } catch { /* fall through to http error */ }
-  }
-  return httpErr || OFFLINE()
+    }
+  } catch { /* bonus unavailable — the result itself is still valid */ }
+  return http
 }
 
 export async function createProfile(payload) {

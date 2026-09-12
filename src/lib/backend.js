@@ -1,6 +1,7 @@
 // Thin client for the Vercel backend (/api/*).
 // Every call resolves — never throws. { ok:false, offline:true } means
-// "no backend reachable", and pages fall back to the on-device path.
+// "no backend reachable". State calls fall back to on-device paths;
+// AI classify has no fallback — the Scanner retries it until it answers.
 // Mutations retry once on 503 (transient storage pressure).
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 

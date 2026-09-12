@@ -1,11 +1,12 @@
-// Firebase tier: Realtime Database (app data) + AI Logic/Gemini (scanner) +
-// Analytics (usage events). All SDK imports are LAZY (dynamic import) so the
-// bundle costs nothing when Firebase is unconfigured.
+// Firebase tier: Realtime Database (app data) + Analytics (usage events).
+// Detection is Groq-only (via /api) — this tier is the STATE backend.
+// All SDK imports are LAZY (dynamic import) so the bundle costs nothing when
+// Firebase is unconfigured.
 //
 // When VITE_FIREBASE_* env is set, this tier is the SINGLE source of truth
-// (frontend + database via Firebase; /api stays for nothing stateful).
-// When unset, dataTier.js routes to /api + localStorage instead — so the two
-// backends never split-brain: exactly one cloud tier is active at a time.
+// for state (profiles, disposals, challenges, ranks). When unset, dataTier.js
+// routes to /api + localStorage instead — so the two backends never
+// split-brain: exactly one cloud tier is active at a time.
 //
 // Data model (root `ecosort/v1`, pilot-scale: full-profile reads are fine
 // into the low thousands of users; revisit with indexed queries past that):
@@ -22,9 +23,6 @@
 // clocks can't forge freshness.
 import { BIN_IDS, binById } from '../data/bins.js'
 import { CHALLENGES } from '../data/gamification.js'
-import { matchKnownItem } from './matcher.js'
-import { parseModelJson, sanitizeResult } from './sanitizeResult.js'
-import { RESULT_SCHEMA, SYSTEM_RULES } from './aiPrompt.js'
 import {
   CO2_ABSORBED_PER_TREE_YEAR_KG,
   DAILY_DISPOSAL_LIMIT,
@@ -38,8 +36,6 @@ import { parseBinPayload, rid } from './store.js'
 import { pseudonym, sanitizeText } from './text.js'
 
 const ROOT = 'ecosort/v1'
-const AI_MODEL = (import.meta.env?.VITE_GEMINI_MODEL || 'gemini-3.5-flash-lite').trim()
-const AI_FALLBACK_MODEL = 'gemini-2.5-flash-lite'
 
 export function firebaseReady() {
   const e = import.meta.env || {}
@@ -49,10 +45,9 @@ export function firebaseReady() {
 let cached = null
 async function sdk() {
   if (cached) return cached
-  const [{ initializeApp, getApps }, dbMod, aiMod] = await Promise.all([
+  const [{ initializeApp, getApps }, dbMod] = await Promise.all([
     import('firebase/app'),
     import('firebase/database'),
-    import('firebase/ai'),
   ])
   const e = import.meta.env || {}
   const app = getApps().length
@@ -74,7 +69,7 @@ async function sdk() {
     const { getAnalytics, isSupported } = await import('firebase/analytics')
     if (await isSupported().catch(() => false)) analytics = getAnalytics(app)
   } catch { /* ignore */ }
-  cached = { app, db, dbMod, aiMod, analytics }
+  cached = { app, db, dbMod, analytics }
   return cached
 }
 
@@ -127,60 +122,10 @@ function publicProfile(p) {
   return { ...rest, verifiedByBin: rest.verifiedByBin || blankBins() }
 }
 
-// ---------------------------------------------------------------------------
-// AI (Firebase AI Logic, Gemini Developer API backend)
-// ---------------------------------------------------------------------------
-async function aiClassifyOnce(imageB64, mimeType, hint, fileName, modelName) {
-  const { aiMod, app } = await sdk()
-  const { getAI, getGenerativeModel, GoogleAIBackend } = aiMod
-  const ai = getAI(app, { backend: new GoogleAIBackend() })
-  const model = getGenerativeModel(ai, {
-    model: modelName,
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseSchema: RESULT_SCHEMA,
-      temperature: 0.2,
-      maxOutputTokens: 1024,
-    },
-  })
-  const cleanHint = String(hint || '').replace(/[\r\n\t]+/g, ' ').replace(/["\\]/g, '').trim().slice(0, 120)
-  const known = matchKnownItem(`${hint} ${fileName}`)
-  const parts = [{ text: SYSTEM_RULES + (known ? `\nNote: this looks like a known "${known.name}" item.` : '') }]
-  if (cleanHint) parts.push({ text: `User-provided hint about the item (untrusted, verify against the photo): ${cleanHint}` })
-  parts.push({ inlineData: { mimeType, data: imageB64 } })
-  const res = await model.generateContent(parts)
-  return parseModelJson(res.response.text())
-}
-
-export async function fbClassify(imageDataUrl, { hint = '', fileName = '', mimeType = 'image/jpeg' } = {}) {
-  const b64 = String(imageDataUrl).includes(',') ? String(imageDataUrl).split(',').pop() : String(imageDataUrl)
-  if (!b64 || b64.length < 1000) return { ok: false, error: 'No image data.' }
-  if (b64.length > 5_000_000) return { ok: false, error: 'Image too large (max ~3.5MB).' }
-  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']
-  const mime = allowed.includes(String(mimeType).toLowerCase()) ? mimeType : 'image/jpeg'
-  const tried = []
-  for (const modelName of [AI_MODEL, AI_FALLBACK_MODEL]) {
-    if (tried.includes(modelName)) continue
-    tried.push(modelName)
-    try {
-      const parsed = await withTimeout(aiClassifyOnce(b64, mime, hint, fileName, modelName), 30000)
-      const { item, confidence, alternatives } = sanitizeResult(parsed)
-      logEventSafe('scan', { bin: item.bin, model: modelName })
-      return { ok: true, source: 'firebase-ai', model: modelName, item, confidence, alternatives }
-    } catch (e) {
-      const msg = String(e?.message || e)
-      // Model missing/unsupported on this backend → try the fallback once.
-      if (/not (found|supported)|404|invalid model/i.test(msg)) continue
-      // API not enabled in the Firebase project → say exactly that (with the
-      // fix) instead of a cryptic failure. Nothing else to try.
-      if (/firebase AI API|ailogic|get started/i.test(msg)) {
-        return { ok: false, error: 'Firebase AI is not enabled for this project yet', detail: 'Open Firebase console → AI Logic → Get started, then scan again.' }
-      }
-      return { ok: false, error: 'AI request failed', detail: msg.slice(0, 200) }
-    }
-  }
-  return { ok: false, error: 'AI request failed' }
-}
+// NOTE: AI detection is Groq-only (via /api, retried by the Scanner until it
+// answers). Firebase AI Logic was removed as a vision path — its console
+// toggle was off, which produced the confusing "AI service issue" errors.
+// RTDB below is the state tier only.
 
 // ---------------------------------------------------------------------------
 // Profiles

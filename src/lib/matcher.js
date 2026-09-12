@@ -3,7 +3,7 @@ import { WASTE_ITEMS } from '../data/wasteItems.js'
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // Word-boundary, longest-keyword-wins matcher over the knowledge base.
-// Shared by the on-device fallback (classifier.js) and the server-side guard
+// Shared by the client hint matcher and the server-side guard
 // (api/classify.js) so both resolve hints identically.
 export function matchKnownItem(text) {
   const t = (text || '').toLowerCase()
