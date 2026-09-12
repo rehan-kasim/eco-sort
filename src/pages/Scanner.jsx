@@ -10,16 +10,16 @@ import { loadState, saveState } from '../lib/store.js'
 
 const SAMPLE_HINTS = ['plastic bottle', 'banana peel', 'old phone', 'chips packet', 'newspaper', 'battery']
 
-// Staged pipeline labels shown while Groq works.
+  // Staged pipeline labels shown while Gemini works.
 const STEPS = [
   { label: 'Preprocessing image', detail: 'Resize · denoise · normalize lighting' },
   { label: 'Detecting object', detail: 'Foreground segmentation + bounding box' },
-  { label: 'Classifying material', detail: 'Groq vision · 4-bin segregation rules' },
+  { label: 'Classifying material', detail: 'Gemini vision · 4-bin segregation rules' },
   { label: 'Mapping to bin', detail: 'City segregation rules · school bin map' },
 ]
 
 // Backoff between attempts (then 15s forever until success, cancel, or a
-// non-retryable error). Detection is Groq-only — there is no local fallback.
+// non-retryable error). Detection is Gemini-only — there is no local fallback.
 const RETRY_DELAYS = [2000, 4000, 8000, 15000]
 const NON_RETRYABLE = new Set([400, 401, 403, 404, 405, 413])
 
@@ -30,7 +30,6 @@ export default function Scanner() {
   const [stage, setStage] = useState('idle') // idle | scanning | done
   const [stepIdx, setStepIdx] = useState(0)
   const [result, setResult] = useState(null)
-  const [source, setSource] = useState('') // provider id from the backend ('groq')
   const [notice, setNotice] = useState('')
   const [attempt, setAttempt] = useState(0)
   const [fileError, setFileError] = useState('')
@@ -67,27 +66,26 @@ export default function Scanner() {
 
   // hintText param: callers with a fresh hint (chip click) pass it directly —
   // reading `hint` state here would see the pre-click value.
-  // Groq is the only detector: on retryable failures (offline, rate limit,
+  // Gemini is the only detector: on retryable failures (offline, rate limit,
   // 5xx, timeout) this loops with backoff until the AI answers, the user
   // cancels, or a non-retryable error (bad image) stops it.
   const run = async (dataUrl, name, hintText = hint) => {
     if (scanningRef.current) return
     scanningRef.current = true
     cancelRef.current = false
-    setStage('scanning'); setStepIdx(0); setResult(null); setSource(''); setNotice(''); setElapsed(0); setAttempt(0)
+    setStage('scanning'); setStepIdx(0); setResult(null); setNotice(''); setElapsed(0); setAttempt(0)
     const tick = setInterval(() => setStepIdx((i) => Math.min(i + 1, 3)), 900)
     // The staged checklist finishes in ~3.6s but the AI call can take up to
     // ~10s — after 4s show an honest "still working" line with a live timer.
     const t0 = Date.now()
     const clock = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 500)
-    const finish = (r, src, scan) => {
+    const finish = (r, scan) => {
       const s = loadState()
       // The scan token (server-issued, unforgeable) is what earns the
       // scan-match bonus at dispose time — plain timestamps are not trusted.
       // On the Firebase tier the equivalent is scanId (consumed server-time).
       saveState({ ...s, lastScan: { item: r.item.name, bin: r.item.bin, at: scan?.at || Date.now(), token: scan?.token || null, scanId: scan?.id || null } })
       setResult(r)
-      setSource(src)
       setStage('done')
     }
     const wait = (ms) => new Promise((res) => setTimeout(res, ms))
@@ -107,7 +105,7 @@ export default function Scanner() {
         setAttempt(n)
         const remote = await classifyRemote({ image: dataUrl, mimeType: mime, hint: hintText, fileName: name })
         if (remote.ok) {
-          finish({ item: remote.item, confidence: remote.confidence, alternatives: remote.alternatives || [], steps: STEPS }, remote.source || 'groq', remote.scan)
+          finish({ item: remote.item, confidence: remote.confidence, alternatives: remote.alternatives || [], steps: STEPS }, remote.scan)
           return
         }
         // Non-retryable: retrying the same image can never succeed.
@@ -116,7 +114,7 @@ export default function Scanner() {
           setStage('done')
           return
         }
-        // Honor the server's countdown when present (Groq tells us exactly how
+        // Honor the server's countdown when present (the AI tells us exactly how
         // long the rate-limit window lasts) — blind fixed-interval retries are
         // what keep a limited window slammed shut.
         const serverWaitMs = (Number(remote.retryAfter) || 0) * 1000
@@ -128,7 +126,7 @@ export default function Scanner() {
             : remote.http === 504
               ? 'AI took too long'
               : `AI service issue (${remote.error || 'server error'})`
-        setNotice(`${reason} — attempt ${n} failed, retrying in ${Math.round(waitMs / 1000)}s… (Groq keeps trying until it answers)`)
+        setNotice(`${reason} — attempt ${n} failed, retrying in ${Math.round(waitMs / 1000)}s… (Gemini keeps trying until it answers)`)
         await wait(waitMs)
       }
     } finally {
@@ -235,11 +233,11 @@ export default function Scanner() {
             <>
               {notice && <p role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[13px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-200">{notice}</p>}
               {result
-                ? <ResultView result={result} source={source} onVerify={() => nav('/verify')} />
+                ? <ResultView result={result} onVerify={() => nav('/verify')} />
                 : (
                   <div className="grid place-items-center py-10 text-center">
                     <p className="font-display font-bold">No result yet</p>
-                    <p className="mt-1 max-w-xs text-sm text-[var(--color-muted-fg)]">Upload a photo and Groq will keep trying until it answers.</p>
+                    <p className="mt-1 max-w-xs text-sm text-[var(--color-muted-fg)]">Upload a photo and Gemini will keep trying until it answers.</p>
                   </div>
                 )}
             </>
@@ -249,13 +247,13 @@ export default function Scanner() {
 
       <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-[var(--color-muted-fg)]">
         <Info size={14} className="mt-0.5 shrink-0" />
-        Groq AI via backend. Never stored. Retries automatically until it answers.
+        Gemini vision via backend. Never stored. Retries automatically until it answers.
       </p>
     </div>
   )
 }
 
-function ResultView({ result, source, onVerify }) {
+function ResultView({ result, onVerify }) {
   const { item, confidence, alternatives } = result
   const bin = binById(item.bin)
   return (
@@ -264,7 +262,7 @@ function ResultView({ result, source, onVerify }) {
         <BinBadge bin={item.bin} />
         <span className="flex items-center gap-2">
           <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
-            {source === 'gemini' ? 'Gemini AI' : source === 'firebase-ai' ? 'Firebase AI' : 'Groq AI'}
+            Gemini AI
           </span>
           <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white dark:bg-white dark:text-slate-900">{confidence}% confident</span>
         </span>

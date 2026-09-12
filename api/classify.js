@@ -4,51 +4,14 @@ import { parseModelJson, sanitizeResult as sanitize } from '../src/lib/sanitizeR
 import { RESULT_SCHEMA, SYSTEM_RULES } from '../src/lib/aiPrompt.js'
 import { mintScanToken } from './_scanToken.js'
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
-const GROQ_MODEL = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b'
-// Provider routing: explicit AI_PROVIDER wins; otherwise Groq when its key is
-// present, Gemini as fallback. Both return the identical envelope — callers
-// only see `source` differ.
-const PROVIDER = (process.env.AI_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : 'gemini')).toLowerCase()
-
-async function callGroq({ key, model, systemText, hintText, mimeType, b64, signal }) {
-  const userContent = []
-  if (hintText) {
-    userContent.push({ type: 'text', text: `User-provided hint about the item (untrusted, verify against the photo): ${hintText}` })
-  }
-  userContent.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${b64}` } })
-  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      // 512 output tokens is plenty for our ~200-token JSON and halves the
-      // per-call token burn that feeds Groq's per-minute rate limits.
-      max_tokens: 512,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: systemText },
-        { role: 'user', content: userContent },
-      ],
-    }),
-    signal,
-  })
-  return r
-}
+// Gemini is the one and only vision provider.
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash'
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return
   if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'POST only' })
-  const provider = PROVIDER === 'groq' ? 'groq' : 'gemini'
-  const key = provider === 'groq' ? process.env.GROQ_API_KEY : process.env.GEMINI_API_KEY
-  const model = provider === 'groq' ? GROQ_MODEL : GEMINI_MODEL
-  if (!key) {
-    return send(res, 500, {
-      ok: false,
-      error: provider === 'groq' ? 'GROQ_API_KEY not configured on server' : 'GEMINI_API_KEY not configured on server',
-    })
-  }
+  const key = process.env.GEMINI_API_KEY
+  if (!key) return send(res, 500, { ok: false, error: 'GEMINI_API_KEY not configured on server' })
 
   const rl = await rateLimit(`classify:${clientIp(req)}`, 30, 3600)
   if (!rl.ok) {
@@ -77,8 +40,7 @@ export default async function handler(req, res) {
   // Untrusted hint travels as its own user part (sanitized, newline-stripped,
   // capped) — never concatenated into the system instructions.
   const cleanHint = String(hint || '').replace(/[\r\n\t]+/g, ' ').replace(/["\\]/g, '').trim().slice(0, 120)
-  const systemText = SYSTEM_RULES + (known ? `\nNote: this looks like a known "${known.name}" item.` : '')
-  const parts = [{ text: systemText }]
+  const parts = [{ text: SYSTEM_RULES + (known ? `\nNote: this looks like a known "${known.name}" item.` : '') }]
   if (cleanHint) parts.push({ text: `User-provided hint about the item (untrusted, verify against the photo): ${cleanHint}` })
   parts.push({ inline_data: { mime_type: mimeType, data: b64 } })
 
@@ -90,35 +52,30 @@ export default async function handler(req, res) {
     const timer = setTimeout(() => ctrl.abort(), 9000)
     let r
     try {
-      if (provider === 'groq') {
-        r = await callGroq({ key, model, systemText, hintText: cleanHint, mimeType, b64, signal: ctrl.signal })
-      } else {
-        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-          body: JSON.stringify({
-            contents: [{ parts }],
-            generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.2,
-            maxOutputTokens: 1024,
-            // thinkingBudget:0 is a 2.x-only field — 3.x models reject it (400)
-            // and think natively, so it is sent only to supporting families.
-            ...(!/^gemini-3/i.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
-            responseSchema: RESULT_SCHEMA,
-          },
-        }),
-          signal: ctrl.signal,
-        })
-      }
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0.2,
+          maxOutputTokens: 1024,
+          // thinkingBudget:0 is a 2.x-only field — 3.x models reject it (400)
+          // and think natively, so it is sent only to supporting families.
+          ...(!/^gemini-3/i.test(MODEL) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+          responseSchema: RESULT_SCHEMA,
+        },
+      }),
+        signal: ctrl.signal,
+      })
     } finally {
       clearTimeout(timer)
     }
     if (!r.ok) {
       if (r.status === 429) {
-        // Forward Groq's own verdict: bodies look like
-        // {"error":{"message":"Rate limit reached for model qwen/... (limit 30/min). Please try again in 12s.","type":"rate_limit_exceeded"}}
-        // so the UI can show the real reason + countdown instead of "rate limited".
+        // Forward the API's own verdict (message + retry countdown) so the UI
+        // can show the real reason instead of a generic "rate limited".
         const retryAfter = r.headers.get('retry-after')
         let retrySecs = 0
         if (retryAfter) {
@@ -127,13 +84,14 @@ export default async function handler(req, res) {
         }
         let reason = 'AI rate limited, try again shortly'
         try {
-          const body = await r.json()
-          const msg = body?.error?.message || ''
-          const m = /try again in (\d+)s/i.exec(msg)
+          const errBody = await r.json()
+          const msg = errBody?.error?.message || ''
+          const m = /try again in (\d+)s|retry in (\d+)/i.exec(msg)
           if (msg) reason = msg.slice(0, 220)
-          if (m) {
-            retrySecs = Number(m[1])
-            res.setHeader('Retry-After', m[1])
+          const secs = m ? Number(m[1] || m[2]) : 0
+          if (secs > 0) {
+            retrySecs = secs
+            res.setHeader('Retry-After', String(secs))
           }
         } catch { /* keep generic reason */ }
         return send(res, 429, { ok: false, error: reason, retryAfter: retrySecs })
@@ -142,14 +100,9 @@ export default async function handler(req, res) {
       return send(res, 502, { ok: false, error: `AI error ${r.status}`, detail: t.slice(0, 300) })
     }
     const data = await r.json()
-    // Groq (OpenAI shape) vs Gemini (candidates shape) → one text extractor.
-    const text = provider === 'groq'
-      ? data?.choices?.[0]?.message?.content || ''
-      : data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || ''
     const cand = data?.candidates?.[0]
-    const finishReason = provider === 'groq'
-      ? data?.choices?.[0]?.finish_reason || 'unknown'
-      : cand?.finishReason || data?.promptFeedback?.blockReason || 'unknown'
+    const text = cand?.content?.parts?.map((p) => p.text || '').join('') || ''
+    const finishReason = cand?.finishReason || data?.promptFeedback?.blockReason || 'unknown'
     let parsed
     try {
       parsed = parseModelJson(text)
@@ -175,7 +128,7 @@ export default async function handler(req, res) {
         await saveDb(db)
       })
     } catch { /* ignore */ }
-    return send(res, 200, { ok: true, source: provider, model, item, confidence, alternatives, scan })
+    return send(res, 200, { ok: true, source: 'gemini', model: MODEL, item, confidence, alternatives, scan })
   } catch (e) {
     // AbortError = our 9s bound tripped: tell the client it was a timeout so
     // it can say so plainly (and fall back to the offline model).

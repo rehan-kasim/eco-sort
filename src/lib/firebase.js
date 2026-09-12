@@ -1,5 +1,5 @@
 // Firebase tier: Realtime Database (app data) + Analytics (usage events).
-// Detection is Groq-only (via /api) — this tier is the STATE backend.
+// Detection is Gemini-only (via /api) — this tier is the STATE backend.
 // All SDK imports are LAZY (dynamic import) so the bundle costs nothing when
 // Firebase is unconfigured.
 //
@@ -122,7 +122,7 @@ function publicProfile(p) {
   return { ...rest, verifiedByBin: rest.verifiedByBin || blankBins() }
 }
 
-// NOTE: AI detection is Groq-only (via /api, retried by the Scanner until it
+// NOTE: AI detection is Gemini-only (via /api, retried by the Scanner until it
 // answers). Firebase AI Logic was removed as a vision path — its console
 // toggle was off, which produced the confusing "AI service issue" errors.
 // RTDB below is the state tier only.

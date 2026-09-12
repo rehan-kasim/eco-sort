@@ -1,5 +1,5 @@
 // Browser image helpers: read an uploaded file and downscale it before upload.
-// Kept separate from detection (detection is Groq-only, server-side).
+// Kept separate from detection (detection is Gemini-only, server-side).
 export function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader()

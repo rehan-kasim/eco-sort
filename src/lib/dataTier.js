@@ -2,7 +2,7 @@
 //   STATE (profiles, disposals, challenges, ranks): exactly ONE cloud tier is
 //   ever active — Firebase when configured, else /api. Never cascades (that
 //   would split-brain stores). Unreachable → {offline:true} → on-device paths.
-//   AI (classify): Groq via /api ONLY — a single detector, retried by the
+//   AI (classify): Gemini via /api ONLY — a single detector, retried by the
 //   caller until it answers. There is no local fallback model.
 // Signatures match backend.js exactly.
 import {
@@ -27,7 +27,7 @@ async function fb() {
 }
 
 export async function classifyRemote(payload) {
-  // Groq via /api is the one and only detector. A single attempt per call —
+  // Gemini via /api is the one and only detector. A single attempt per call —
   // the Scanner loops with backoff until it succeeds. On success, record the
   // Firebase scan entry too (when that tier is configured) so the +10 bonus
   // path keeps working there.

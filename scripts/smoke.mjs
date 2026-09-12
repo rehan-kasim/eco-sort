@@ -214,7 +214,7 @@ function testPng() {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))])
 }
 
-if ((!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) || process.env.SKIP_GEMINI) {
+if (!process.env.GEMINI_API_KEY || process.env.SKIP_GEMINI) {
   console.log('SKIP ai.classify (no API key or SKIP_GEMINI=1)')
 } else {
   const pngB64 = testPng().toString('base64')
@@ -222,7 +222,7 @@ if ((!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) || process.env.SK
   if (!cl.ok && /429|rate|quota/i.test(`${cl.error || ''} ${JSON.stringify(cl.detail || '')}`)) {
     console.log('SKIP ai.classify (API quota-limited right now — app falls back to offline model)')
   } else {
-    ok('ai.classify', cl.ok && ['groq', 'gemini'].includes(cl.source) && ['WET', 'DRY', 'RECYCLABLE', 'E_WASTE'].includes(cl.item?.bin), `source=${cl.source} model=${cl.model || '?'} item=${cl.item?.name} bin=${cl.item?.bin}`)
+    ok('ai.classify', cl.ok && cl.source === 'gemini' && cl.model === 'gemini-3.6-flash' && ['WET', 'DRY', 'RECYCLABLE', 'E_WASTE'].includes(cl.item?.bin), `source=${cl.source} model=${cl.model || '?'} item=${cl.item?.name} bin=${cl.item?.bin}`)
   }
 }
 
