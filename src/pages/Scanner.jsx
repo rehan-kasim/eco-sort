@@ -116,11 +116,15 @@ export default function Scanner() {
           setStage('done')
           return
         }
-        const waitMs = RETRY_DELAYS[Math.min(n - 1, RETRY_DELAYS.length - 1)]
+        // Honor the server's countdown when present (Groq tells us exactly how
+        // long the rate-limit window lasts) — blind fixed-interval retries are
+        // what keep a limited window slammed shut.
+        const serverWaitMs = (Number(remote.retryAfter) || 0) * 1000
+        const waitMs = Math.max(RETRY_DELAYS[Math.min(n - 1, RETRY_DELAYS.length - 1)], serverWaitMs)
         const reason = remote.offline
           ? 'No connection to the AI backend'
           : remote.http === 429
-            ? 'AI is rate-limited'
+            ? (remote.error && remote.error !== 'AI rate limited, try again shortly' ? remote.error : 'AI is rate-limited')
             : remote.http === 504
               ? 'AI took too long'
               : `AI service issue (${remote.error || 'server error'})`

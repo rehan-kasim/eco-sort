@@ -20,10 +20,12 @@ async function callGroq({ key, model, systemText, hintText, mimeType, b64, signa
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({
+      body: JSON.stringify({
       model,
       temperature: 0.2,
-      max_tokens: 1024,
+      // 512 output tokens is plenty for our ~200-token JSON and halves the
+      // per-call token burn that feeds Groq's per-minute rate limits.
+      max_tokens: 512,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemText },
@@ -114,9 +116,27 @@ export default async function handler(req, res) {
     }
     if (!r.ok) {
       if (r.status === 429) {
+        // Forward Groq's own verdict: bodies look like
+        // {"error":{"message":"Rate limit reached for model qwen/... (limit 30/min). Please try again in 12s.","type":"rate_limit_exceeded"}}
+        // so the UI can show the real reason + countdown instead of "rate limited".
         const retryAfter = r.headers.get('retry-after')
-        if (retryAfter) res.setHeader('Retry-After', String(retryAfter).slice(0, 8))
-        return send(res, 429, { ok: false, error: 'AI rate limited, try again shortly' })
+        let retrySecs = 0
+        if (retryAfter) {
+          res.setHeader('Retry-After', String(retryAfter).slice(0, 8))
+          retrySecs = Number(retryAfter) || 0
+        }
+        let reason = 'AI rate limited, try again shortly'
+        try {
+          const body = await r.json()
+          const msg = body?.error?.message || ''
+          const m = /try again in (\d+)s/i.exec(msg)
+          if (msg) reason = msg.slice(0, 220)
+          if (m) {
+            retrySecs = Number(m[1])
+            res.setHeader('Retry-After', m[1])
+          }
+        } catch { /* keep generic reason */ }
+        return send(res, 429, { ok: false, error: reason, retryAfter: retrySecs })
       }
       const t = await r.text().catch(() => '')
       return send(res, 502, { ok: false, error: `AI error ${r.status}`, detail: t.slice(0, 300) })

@@ -1,13 +1,1 @@
-{
-  "profiles": {},
-  "progress": {},
-  "completed": {},
-  "baselines": {},
-  "schoolSites": {},
-  "counters": {
-    "disposals": 0,
-    "co2": 0,
-    "scans": 1
-  },
-  "seq": 1
-}
+{"profiles":{},"progress":{},"completed":{},"baselines":{},"counters":{"disposals":0,"co2":0,"scans":0},"seq":0}
